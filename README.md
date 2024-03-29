@@ -35,7 +35,7 @@ As opposed to RL models, which blindly take actions based on the reward function
 
 # Results
 
-Our experimentations (342 fights so far) led to the following leader board.
+Our experimentations (314 fights so far) led to the following leader board.
 Each LLM has an ELO score based on its results
 
 ## Ranking
@@ -44,14 +44,15 @@ Each LLM has an ELO score based on its results
 
 | Model                          |  Rating |
 | ------------------------------ | ------: |
-| 🥇openai:gpt-3.5-turbo-0125    | 1776.11 |
-| 🥈mistral:mistral-small-latest | 1586.16 |
-| 🥉openai:gpt-4-1106-preview    | 1584.78 |
-| openai:gpt-4                   |  1517.2 |
-| openai:gpt-4-turbo-preview     | 1509.28 |
-| openai:gpt-4-0125-preview      | 1438.92 |
-| mistral:mistral-medium-latest  | 1356.19 |
-| mistral:mistral-large-latest   | 1231.36 |
+| 🥇claude_3_haiku               | 1613    |
+| 🥈claude_3_sonnet              | 1557    |
+| 🥉claude_2                     | 1554    |
+| claude_instant                 |  1548   |
+| cohere_light                   | 1527    |
+| cohere_command                 | 1511    |
+| titan_express                  | 1502    |
+| mistral_7b                     | 1490    |
+
 
 ### Win rate matrix
 
@@ -68,13 +69,30 @@ We send to the LLM a text description of the screen. The LLM decide on the next 
 
   ![fight3 drawio](https://github.com/OpenGenerativeAI/llm-colosseum/assets/78322686/3a212601-f54c-490d-aeb9-6f7c2401ebe6)
 
+# Prerequisites
+
+* Install [Docker](https://docs.docker.com/engine/install/)
+* [Model Access in Amazon Bedrock](https://us-east-1.console.aws.amazon.com/bedrock/home?region=us-east-1#/modelaccess) fo us-east-1 and us-west-2. [Details here](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access.html)
+
 # Installation
 
 - Follow instructions in https://docs.diambra.ai/#installation
 - Download the ROM and put it in `~/.diambra/roms`
 - Install with `pip3 install -r requirements`
 - Create a `.env` file and fill it with the content like in the `.env.example` file
+- Start Docker Diambra container
+```bash
+docker run -d -v $HOME/.diambra/credentials:/tmp/.diambra/credentials   -v /Users/$USER/.diambra/roms:/opt/diambraArena/roms -p 50051:50051 docker.io/diambra/engine:latest
+```
 - Run with `make run`
+
+### Demo mode
+
+- Run with `make demo`
+
+### Endless mode
+
+- Run with `make go`
 
 ## Test mode
 
@@ -84,42 +102,6 @@ It will choose the action randomly.
 ## Logging
 
 Change the logging level in the `script.py` file.
-
-## Local model
-
-You can run the arena with local models.
-
-1. Make sure you have ollama installed, running, and with a model downloaded (run `ollama serve mistral` in the terminal for example)
-
-2. Make sure you pulled the latest version from the `main` branch:
-
-```
-git checkout main
-git pull
-```
-
-4. In `script.py`, replace the main function with the following one.
-
-```python
-def main():
-    # Environment Settings
-    game = Game(
-        render=True,
-        player_1=Player1(
-            nickname="Daddy",
-            model="ollama:mistral",
-        ),
-        player_2=Player2(
-            nickname="Baby",
-            model="ollama:mistral",
-        ),
-    )
-    return game.run()
-```
-
-The convention we use is `model_provider:model_name`. If you want to use another local model than Mistral, you can do `ollama:some_other_model`
-
-5. Run the simulation: `make`
 
 ## How to make my own LLM model play? Can I improve the prompts?
 
@@ -137,9 +119,6 @@ The LLM is called in `Robot.call_llm()` method of the `agent/robot.py` file.
 
         Edit this method to change the behavior of the robot!
         """
-        # self.model is a slug like mistral:mistral-small-latest or ollama:mistral
-        provider_name, model_name = get_provider_and_model(self.model)
-        client = get_sync_client(provider_name) # OpenAI client
 
         # Generate the prompts
         move_list = "- " + "\n - ".join([move for move in META_INSTRUCTIONS])
@@ -158,20 +137,21 @@ Example if the opponent is far:
 - Fireball
 - Move closer"""
 
-        # Call the LLM
-        completion = client.chat.completions.create(
-            model=model_name,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": "Your next moves are:"},
-            ],
-            temperature=temperature,
-            max_tokens=max_tokens,
-            top_p=top_p,
-        )
+        prompt = "Your next moves are:"
 
-        # Return the string to be parsed with regex
-        llm_response = completion.choices[0].message.content.strip()
+        start_time = time.time()
+
+        logger.debug(f"LLM call to {self.model}: {system_prompt}")
+        logger.debug(f"LLM call to {self.model}: {time.time() - start_time}s")
+
+        print(system_prompt + "\n" + prompt)
+        if self.player_nb == "1":
+            bedrock_runtime = bedrock_runtime_east
+        else:
+            bedrock_runtime = bedrock_runtime_west
+
+        llm_response = call_bedrock_model(self.model, system_prompt, prompt, bedrock_runtime)
+        print(f"{self.model} making move {llm_response}")
         return llm_response
 ```
 

@@ -16,6 +16,33 @@ from diambra.arena import (
 from rich import print
 
 
+def random_bedrock_model():
+
+    models = [
+        "mistral_8x7b",
+        "mistral_7b",
+        "ai21_ultra",
+        "ai21_mid",
+        "claude_3_sonnet",
+        "claude_3_haiku",
+        "claude_2",
+        # "claude_2_1", # Doesn't want to play
+        "claude_instant",
+        "cohere_command",
+        "cohere_light",
+        "titan_express",
+        "titan_lite",
+        # "llama2_13b", # not working
+        # "llama2_70b", # not working
+    ]
+
+    random.seed()
+    # Generate a pair of random models
+    random_model = random.choice(models)
+
+    return random_model
+
+
 def generate_random_model(openai: bool = False, mistral: bool = True):
     models_available = []
 

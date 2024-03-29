@@ -4,11 +4,11 @@ import re
 import time
 from collections import defaultdict
 from typing import Dict, List, Literal, Optional
-
+import boto3
+import json
 import numpy as np
 from gymnasium import spaces
 from loguru import logger
-from phospho.lab import get_provider_and_model, get_sync_client
 from rich import print
 
 from .config import (
@@ -21,6 +21,18 @@ from .config import (
     Y_SIZE,
 )
 from .observer import detect_position_from_color
+
+
+bedrock_runtime_east = boto3.client(
+    service_name="bedrock-runtime",
+    region_name="us-east-1",
+)
+
+
+bedrock_runtime_west = boto3.client(
+    service_name="bedrock-runtime",
+    region_name="us-west-2",
+)
 
 
 class Robot:
@@ -131,16 +143,44 @@ class Robot:
 
         # Call the LLM to get the next steps
         next_steps_from_llm = self.get_moves_from_llm()
-        next_buttons_to_press = [
-            button
-            for combo in next_steps_from_llm
-            for button in META_INSTRUCTIONS_WITH_LOWER[combo][
-                self.current_direction.lower()
-            ]
-            # We add a wait time after each button press
-            + [0] * NB_FRAME_WAIT
-        ]
+        # print(next_steps_from_llm)
+        # print(META_INSTRUCTIONS_WITH_LOWER)
+
+        # if next_steps_from_llm is a number pick a key from META_INSTRUCTIONS_WITH_LOWER
+        # if isinstance(next_steps_from_llm, int):
+        #     next_steps_from_llm = random.choice(list(META_INSTRUCTIONS_WITH_LOWER.keys()))
+
+        next_buttons_to_press = []
+
+        for combo in next_steps_from_llm:
+            try:
+                direction_buttons = META_INSTRUCTIONS_WITH_LOWER[combo][
+                    self.current_direction.lower()
+                ]
+            except KeyError:
+                # print(f"KeyError occurred for combo: {combo}")
+                direction_buttons = META_INSTRUCTIONS_WITH_LOWER["lower"][
+                    self.current_direction.lower()
+                ]
+                # continue
+
+            for button in direction_buttons:
+                next_buttons_to_press.append(button)
+
+            next_buttons_to_press.extend([0] * NB_FRAME_WAIT)
+
         self.next_steps.extend(next_buttons_to_press)
+
+        # next_buttons_to_press = [
+        #     button
+        #     for combo in next_steps_from_llm
+        #     for button in META_INSTRUCTIONS_WITH_LOWER[combo][
+        #         self.current_direction.lower()
+        #     ]
+        #     # We add a wait time after each button press
+        #     + [0] * NB_FRAME_WAIT
+        # ]
+        # self.next_steps.extend(next_buttons_to_press)
 
     def observe(self, observation: dict, actions: dict, reward: float):
         """
@@ -286,9 +326,11 @@ To increase your score, move toward the opponent and attack the opponent. To pre
         if os.getenv("DISABLE_LLM", "False") == "True":
             # Choose a random int from the list of moves
             logger.debug("DISABLE_LLM is True, returning a random move")
-            return [random.choice(list(MOVES.values()))]
+            # print(list(MOVES))
+            return [random.choice(list(MOVES.keys()))]
 
         while len(valid_moves) == 0:
+            
             llm_response = self.call_llm()
 
             # The response is a bullet point list of moves. Use regex
@@ -315,6 +357,8 @@ To increase your score, move toward the opponent and attack the opponent. To pre
 
             if len(invalid_moves) > 1:
                 logger.warning(f"Many invalid moves: {invalid_moves}")
+            
+            # time.sleep(1) # try a sleep 
 
         logger.debug(f"Next moves: {valid_moves}")
         return valid_moves
@@ -330,8 +374,6 @@ To increase your score, move toward the opponent and attack the opponent. To pre
 
         Edit this method to change the behavior of the robot!
         """
-        provider_name, model_name = get_provider_and_model(self.model)
-        client = get_sync_client(provider_name)
 
         # Generate the prompts
         move_list = "- " + "\n - ".join([move for move in META_INSTRUCTIONS])
@@ -350,18 +392,455 @@ Example if the opponent is far:
 - Fireball
 - Move closer"""
 
+        prompt = "Your next moves are:"
+
         start_time = time.time()
-        completion = client.chat.completions.create(
-            model=model_name,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": "Your next moves are:"},
-            ],
-            temperature=temperature,
-            max_tokens=max_tokens,
-            top_p=top_p,
-        )
+
         logger.debug(f"LLM call to {self.model}: {system_prompt}")
         logger.debug(f"LLM call to {self.model}: {time.time() - start_time}s")
-        llm_response = completion.choices[0].message.content.strip()
+
+        print(system_prompt + "\n" + prompt)
+        if self.player_nb == "1":
+            bedrock_runtime = bedrock_runtime_east
+        else:
+            bedrock_runtime = bedrock_runtime_west
+
+        llm_response = call_bedrock_model(self.model, system_prompt, prompt, bedrock_runtime)
+        print(f"{self.model} making move {llm_response}")
         return llm_response
+
+
+# Call Mistral model
+def call_mistral_8x7b(system_prompt, prompt, bedrock_runtime):
+    prompt_config = {
+        "prompt": system_prompt + prompt,
+        "max_tokens": 4096,
+        "temperature": 0.7,
+        "top_p": 0.8,
+    }
+
+    body = json.dumps(prompt_config)
+
+    modelId = "mistral.mixtral-8x7b-instruct-v0:1"
+    accept = "application/json"
+    contentType = "application/json"
+
+    response = bedrock_runtime.invoke_model(
+        body=body, modelId=modelId, accept=accept, contentType=contentType
+    )
+    response_body = json.loads(response.get("body").read())
+
+    results = response_body.get("outputs")[0].get("text")
+    return results
+
+
+# Call Mistral model
+def call_mistral_7b(system_prompt, prompt, bedrock_runtime):
+    prompt_config = {
+        "prompt": system_prompt + prompt,
+        "max_tokens": 4096,
+        "temperature": 0.7,
+        "top_p": 0.8,
+    }
+
+    body = json.dumps(prompt_config)
+
+    modelId = "mistral.mistral-7b-instruct-v0:2"
+    accept = "application/json"
+    contentType = "application/json"
+
+    response = bedrock_runtime.invoke_model(
+        body=body, modelId=modelId, accept=accept, contentType=contentType
+    )
+    response_body = json.loads(response.get("body").read())
+
+    results = response_body.get("outputs")[0].get("text")
+    return results
+
+
+# Call AI21 labs model
+def call_ai21_ultra(system_prompt, prompt, bedrock_runtime):
+    prompt_config = {
+        "prompt": system_prompt + prompt,
+        "maxTokens": 5147,
+        "temperature": 0.7,
+        "stopSequences": [],
+    }
+
+    body = json.dumps(prompt_config)
+
+    modelId = "ai21.j2-ultra-v1"
+    accept = "application/json"
+    contentType = "application/json"
+
+    response = bedrock_runtime.invoke_model(
+        body=body, modelId=modelId, accept=accept, contentType=contentType
+    )
+    response_body = json.loads(response.get("body").read())
+
+    results = response_body.get("completions")[0].get("data").get("text")
+    return results
+
+
+def call_ai21_mid(system_prompt, prompt, bedrock_runtime):
+    prompt_config = {
+        "prompt": system_prompt + prompt,
+        "maxTokens": 5147,
+        "temperature": 0.7,
+        "stopSequences": [],
+    }
+
+    body = json.dumps(prompt_config)
+
+    modelId = "ai21.j2-mid-v1"
+    accept = "application/json"
+    contentType = "application/json"
+
+    response = bedrock_runtime.invoke_model(
+        body=body, modelId=modelId, accept=accept, contentType=contentType
+    )
+    response_body = json.loads(response.get("body").read())
+
+    results = response_body.get("completions")[0].get("data").get("text")
+    return results
+
+
+def claude_prompt_format(prompt: str) -> str:
+    # Add headers to start and end of prompt
+    return "\n\nHuman: " + prompt + "\n\nAssistant:"
+
+
+# Call Claude model
+def call_claude_3_sonnet(system_prompt, prompt, bedrock_runtime):
+
+    prompt_config = {
+        "anthropic_version": "bedrock-2023-05-31",
+        "max_tokens": 4096,
+        "system": system_prompt,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                ],
+            }
+        ],
+    }
+
+    body = json.dumps(prompt_config)
+
+    modelId = "anthropic.claude-3-sonnet-20240229-v1:0"
+    accept = "application/json"
+    contentType = "application/json"
+
+    response = bedrock_runtime.invoke_model(
+        body=body, modelId=modelId, accept=accept, contentType=contentType
+    )
+    response_body = json.loads(response.get("body").read())
+
+    results = response_body.get("content")[0].get("text")
+    return results
+
+
+def call_claude_3_haiku(system_prompt, prompt, bedrock_runtime):
+
+    prompt_config = {
+        "anthropic_version": "bedrock-2023-05-31",
+        "max_tokens": 4096,
+        "system": system_prompt,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                ],
+            }
+        ],
+    }
+
+    body = json.dumps(prompt_config)
+
+    modelId = "anthropic.claude-3-haiku-20240307-v1:0"
+    accept = "application/json"
+    contentType = "application/json"
+
+    response = bedrock_runtime.invoke_model(
+        body=body, modelId=modelId, accept=accept, contentType=contentType
+    )
+    response_body = json.loads(response.get("body").read())
+
+    results = response_body.get("content")[0].get("text")
+    return results
+
+
+# Call Claude model
+def call_claude_2_1(system_prompt, prompt, bedrock_runtime):
+    prompt_config = {
+        "prompt": claude_prompt_format(system_prompt + prompt),
+        "max_tokens_to_sample": 4096,
+        "temperature": 0.7,
+        "top_k": 250,
+        "top_p": 0.5,
+        "stop_sequences": [],
+    }
+
+    body = json.dumps(prompt_config)
+
+    modelId = "anthropic.claude-v2:1"
+    accept = "application/json"
+    contentType = "application/json"
+
+    response = bedrock_runtime.invoke_model(
+        body=body, modelId=modelId, accept=accept, contentType=contentType
+    )
+    response_body = json.loads(response.get("body").read())
+
+    results = response_body.get("completion")
+    return results
+
+
+# Call Claude model
+def call_claude_2(system_prompt, prompt, bedrock_runtime):
+    prompt_config = {
+        "prompt": claude_prompt_format(system_prompt + prompt),
+        "max_tokens_to_sample": 4096,
+        "temperature": 0.7,
+        "top_k": 250,
+        "top_p": 0.5,
+        "stop_sequences": [],
+    }
+
+    body = json.dumps(prompt_config)
+
+    modelId = "anthropic.claude-v2"
+    accept = "application/json"
+    contentType = "application/json"
+
+    response = bedrock_runtime.invoke_model(
+        body=body, modelId=modelId, accept=accept, contentType=contentType
+    )
+    response_body = json.loads(response.get("body").read())
+
+    results = response_body.get("completion")
+    return results
+
+
+# Call Claude model
+def call_claude_instant(system_prompt, prompt, bedrock_runtime):
+    prompt_config = {
+        "prompt": claude_prompt_format(system_prompt + prompt),
+        "max_tokens_to_sample": 4096,
+        "temperature": 0.7,
+        "top_k": 250,
+        "top_p": 0.5,
+        "stop_sequences": [],
+    }
+
+    body = json.dumps(prompt_config)
+
+    modelId = "anthropic.claude-instant-v1"
+    accept = "application/json"
+    contentType = "application/json"
+
+    response = bedrock_runtime.invoke_model(
+        body=body, modelId=modelId, accept=accept, contentType=contentType
+    )
+    response_body = json.loads(response.get("body").read())
+
+    results = response_body.get("completion")
+    return results
+
+
+# Call Cohere model
+def call_cohere_command(system_prompt, prompt, bedrock_runtime):
+    prompt_config = {
+        "prompt": system_prompt + prompt,
+        "max_tokens": 2048,
+        "temperature": 0.7,
+    }
+
+    body = json.dumps(prompt_config)
+
+    modelId = "cohere.command-text-v14"
+    accept = "application/json"
+    contentType = "application/json"
+
+    response = bedrock_runtime.invoke_model(
+        body=body, modelId=modelId, accept=accept, contentType=contentType
+    )
+    response_body = json.loads(response.get("body").read())
+
+    results = response_body.get("generations")[0].get("text")
+    return results
+
+
+def call_cohere_light(system_prompt, prompt, bedrock_runtime):
+    prompt_config = {
+        "prompt": system_prompt + prompt,
+        "max_tokens": 2048,
+        "temperature": 0.7,
+    }
+
+    body = json.dumps(prompt_config)
+
+    modelId = "cohere.command-light-text-v14"
+    accept = "application/json"
+    contentType = "application/json"
+
+    response = bedrock_runtime.invoke_model(
+        body=body, modelId=modelId, accept=accept, contentType=contentType
+    )
+    response_body = json.loads(response.get("body").read())
+
+    results = response_body.get("generations")[0].get("text")
+    return results
+
+
+# Call Titan model
+def call_titan_express(system_prompt, prompt, bedrock_runtime):
+    prompt_config = {
+        "inputText": system_prompt + prompt,
+        "textGenerationConfig": {
+            "maxTokenCount": 4096,
+            "stopSequences": [],
+            "temperature": 0.7,
+            "topP": 1,
+        },
+    }
+
+    body = json.dumps(prompt_config)
+
+    modelId = "amazon.titan-text-express-v1"
+    accept = "application/json"
+    contentType = "application/json"
+
+    response = bedrock_runtime.invoke_model(
+        body=body, modelId=modelId, accept=accept, contentType=contentType
+    )
+    response_body = json.loads(response.get("body").read())
+
+    results = response_body.get("results")[0].get("outputText")
+    return results
+
+
+def call_titan_lite(system_prompt, prompt, bedrock_runtime):
+    prompt_config = {
+        "inputText": system_prompt + prompt,
+        "textGenerationConfig": {
+            "maxTokenCount": 4096,
+            "stopSequences": [],
+            "temperature": 0.7,
+            "topP": 1,
+        },
+    }
+
+    body = json.dumps(prompt_config)
+
+    modelId = "amazon.titan-text-lite-v1"
+    accept = "application/json"
+    contentType = "application/json"
+
+    response = bedrock_runtime.invoke_model(
+        body=body, modelId=modelId, accept=accept, contentType=contentType
+    )
+    response_body = json.loads(response.get("body").read())
+
+    results = response_body.get("results")[0].get("outputText")
+    return results
+
+
+def call_llama2_13b(system_prompt, prompt, bedrock_runtime):
+    prompt_config = {
+        "prompt": system_prompt + prompt,
+        "max_gen_len": 2048,
+        "top_p": 0.9,
+        "temperature": 0.7,
+    }
+
+    body = json.dumps(prompt_config)
+
+    modelId = "meta.llama2-13b-chat-v1"
+    accept = "application/json"
+    contentType = "application/json"
+
+    response = bedrock_runtime.invoke_model(
+        body=body, modelId=modelId, accept=accept, contentType=contentType
+    )
+    response_body = json.loads(response.get("body").read())
+
+    results = response_body["generation"].strip()
+    return results
+
+
+def call_llama2_70b(system_prompt, prompt, bedrock_runtime):
+    prompt_config = {
+        "prompt": system_prompt + prompt,
+        "max_gen_len": 2048,
+        "top_p": 0.9,
+        "temperature": 0.7,
+    }
+
+    body = json.dumps(prompt_config)
+
+    modelId = "meta.llama2-70b-chat-v1"
+    accept = "application/json"
+    contentType = "application/json"
+
+    response = bedrock_runtime.invoke_model(
+        body=body, modelId=modelId, accept=accept, contentType=contentType
+    )
+    response_body = json.loads(response.get("body").read())
+
+    results = response_body["generation"].strip()
+    return results
+
+
+def call_bedrock_model(model: str, system_prompt: str, prompt: str, bedrock_runtime):
+
+    # switch statement for models
+    if model == "mistral_8x7b":
+        return call_mistral_8x7b(system_prompt, prompt, bedrock_runtime)
+
+    if model == "mistral_7b":
+        return call_mistral_7b(system_prompt, prompt, bedrock_runtime)
+
+    if model == "ai21_ultra":
+        return call_ai21_ultra(system_prompt, prompt, bedrock_runtime)
+
+    if model == "ai21_mid":
+        return call_ai21_mid(system_prompt, prompt, bedrock_runtime)
+
+    if model == "claude_3_sonnet":
+        return call_claude_3_sonnet(system_prompt, prompt, bedrock_runtime)
+
+    if model == "claude_3_haiku":
+        return call_claude_3_haiku(system_prompt, prompt, bedrock_runtime)
+
+    if model == "claude_2_1":
+        return call_claude_2_1(system_prompt, prompt, bedrock_runtime)
+
+    if model == "claude_2":
+        return call_claude_2(system_prompt, prompt, bedrock_runtime)
+
+    if model == "claude_instant":
+        return call_claude_instant(system_prompt, prompt, bedrock_runtime)
+
+    if model == "cohere_command":
+        return call_cohere_command(system_prompt, prompt, bedrock_runtime)
+
+    if model == "cohere_light":
+        return call_cohere_light(system_prompt, prompt, bedrock_runtime)
+
+    if model == "titan_express":
+        return call_titan_express(system_prompt, prompt, bedrock_runtime)
+
+    if model == "titan_lite":
+        return call_titan_lite(system_prompt, prompt, bedrock_runtime)
+
+    if model == "llama2_13b":
+        return call_llama2_13b(system_prompt, prompt, bedrock_runtime)
+
+    if model == "llama2_70b":
+        return call_llama2_70b(system_prompt, prompt, bedrock_runtime)
+
+    return None

@@ -1,8 +1,8 @@
 run:
-	diambra -r ~/.diambra/roms run -l python3 script.py
+	DIAMBRA_ENVS=localhost:50051 python ./script.py
 
 demo:
-	diambra -r ~/.diambra/roms run -l python3 mistral.py && python3 result.py
+	DIAMBRA_ENVS=localhost:50051 python ./simple.py
 
 install:
 	pip3 install -r requirements.txt
