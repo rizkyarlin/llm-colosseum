@@ -48,8 +48,8 @@ def main():
     rand_model_2 = random.choice(models)
 
     # # force a match
-    rand_model_1 = "ai21_ultra"
-    rand_model_2 = "titan_express"
+    # rand_model_1 = "ai21_ultra"
+    # rand_model_2 = "titan_express"
 
     game = Game(
         render=True,
