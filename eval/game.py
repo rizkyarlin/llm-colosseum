@@ -65,17 +65,6 @@ class Player:
     robot: Optional[Robot] = None
     temperature: Optional[float] = 0.0
 
-    def verify_provider_name(self):
-        if self.model.startswith("openai"):
-            assert (
-                os.environ.get("OPENAI_API_KEY") is not None
-            ), "OpenAI API key not set"
-        if self.model.startswith("mistral"):
-            assert (
-                os.environ.get("MISTRAL_API_KEY") is not None
-            ), "Mistral API key not set"
-
-
 class Player1(Player):
     def __init__(
         self,
@@ -95,8 +84,6 @@ class Player1(Player):
             player_nb=1,
         )
         print(f"[red] Player 1 using: {self.model}")
-        self.verify_provider_name()
-
 
 class Player2(Player):
     def __init__(
@@ -117,8 +104,6 @@ class Player2(Player):
             player_nb=2,
         )
         print(f"[green] Player 2 using: {self.model}")
-        self.verify_provider_name()
-
 
 class Episode:
     player_1: Optional[Player1]
