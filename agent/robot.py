@@ -400,7 +400,7 @@ Example if the opponent is far:
         logger.debug(f"LLM call to {self.model}: {time.time() - start_time}s")
 
         print(system_prompt + "\n" + prompt)
-        if self.player_nb == "1":
+        if self.player_nb == 1:
             bedrock_runtime = bedrock_runtime_east
         else:
             bedrock_runtime = bedrock_runtime_west

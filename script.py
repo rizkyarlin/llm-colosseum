@@ -20,17 +20,17 @@ def main():
     # Environment Settings
 
     models = [
-        "mistral_8x7b",
+        # "mistral_8x7b",
         "mistral_7b",
-        "ai21_ultra",
-        "ai21_mid",
-        "claude_3_sonnet",
+        # "ai21_ultra",
+        # "ai21_mid",
+        # "claude_3_sonnet",
         "claude_3_haiku",
-        "claude_2",
+        # "claude_2",
         # "claude_2_1", # Doesn't want to play
-        "claude_instant",
-        "cohere_command",
-        "cohere_light",
+        # "claude_instant",
+        # "cohere_command",
+        # "cohere_light",
         "titan_express",
         "titan_lite",
         # "llama2_13b", # not working
@@ -48,8 +48,8 @@ def main():
     rand_model_2 = random.choice(models)
 
     # # force a match
-    # rand_model_1 = "ai21_ultra"
-    # rand_model_2 = "titan_express"
+    # rand_model_1 = "titan_lite"
+    # rand_model_2 = "claude_3_haiku"
 
     game = Game(
         render=True,

@@ -9,3 +9,5 @@ results.csv
 results/
 
 .DS_Store
+.idea
+.venv
